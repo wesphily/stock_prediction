@@ -1,0 +1,108 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Sep  2 14:12:32 2019
+
+@author: ptillotson
+"""
+#### Import Dependent Libraries ####
+import pandas as pd
+import pandas_datareader.data as web
+import datetime
+import matplotlib.pyplot as plt
+from matplotlib import style
+import matplotlib as mpl
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+
+
+
+#### Import Stock Data ####
+start = datetime.datetime(2014, 9, 2)
+end = datetime.datetime(2019, 9, 2)
+
+df = web.DataReader("SFNC", 'yahoo', start, end)
+df.tail()
+
+
+
+#### Create 200 and 50 day MA ####
+close_px = df['Adj Close']
+mavg200 = close_px.rolling(window=200).mean()
+mavg50 = close_px.rolling(window=50).mean()
+
+#### Setup Plotter ####
+mpl.rc('figure', figsize=(8, 7))
+mpl.__version__
+style.use('ggplot')
+#### Plot them ####
+close_px.plot(label='SFNC')
+mavg200.plot(label='mavg200')
+mavg50.plot(label='mavg50')
+plt.legend()
+
+#### Plot risk ####
+rets = close_px / close_px.shift(1) - 1
+rets.plot(label='return')
+
+
+#### Correlation  ####
+dfcomp = web.DataReader(['SFNC', 'SRCE', 'ABCB', 'ASB', 'AROW'],'yahoo',start=start,end=end)['Adj Close']
+retscomp = dfcomp.pct_change()
+corr = retscomp.corr()
+print(corr)
+
+
+
+#### Feature Engineering ####
+dfreg = df
+dfreg['HL_PCT'] = (df['High'] - df['Low']) / df['Close'] * 100.0
+dfreg['PCT_change'] = (df['Close'] - df['Open']) / df['Open'] * 100.0
+dfreg.fillna(value=-99999, inplace=True)
+dfreg = dfreg.reset_index()
+dfreg.drop(['Date'],axis=1,inplace=True)
+    
+    
+X_train, X_test, y_train, y_test = train_test_split(dfreg, dfreg['Adj Close'], test_size=0.2,random_state=0)
+
+X_train.drop(['Adj Close'],axis=1,inplace=True)
+X_test.drop(['Adj Close'],axis=1,inplace=True)
+
+scaler = MinMaxScaler()
+X_train[['High', 'Low', 'Open', 'Close', 'Volume', 'HL_PCT', 'PCT_change']] = scaler.fit_transform(X_train[['High', 'Low', 'Open', 'Close', 'Volume', 'HL_PCT', 'PCT_change']])
+X_test[['High', 'Low', 'Open', 'Close', 'Volume', 'HL_PCT', 'PCT_change']] = scaler.transform(X_test[['High', 'Low', 'Open', 'Close', 'Volume', 'HL_PCT', 'PCT_change']])
+
+
+    
+xgb_model = xgb.XGBRegressor()
+ 
+eval_set = [(X_test, y_test)]
+xgb_model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+xgb_model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+xgbpred = xgb_model.predict(X_test)
+print(pd.DataFrame({'Actual': y_test, 'Predicted': xgbpred}))
+
+
+rf_model = RandomForestRegressor(n_estimators=800, max_depth=6)
+rf_model.fit(X_train, y_train)
+rfpred = rf_model.predict(X_test)
+print(pd.DataFrame({'Actual': y_test, 'Predicted': rfpred}))
+
+
+
+SVR_model = SVR()
+SVR_model.fit(scaler.transform(X_train), y_train)
+svrpred = SVR_model.predict(X_test)
+print(pd.DataFrame({'Actual': y_test, 'Predicted': svrpred}))
+
+
+
+########## Visualization ##################
+#### XGB Model ####
+plt.scatter(y_test, xgbpred, alpha=0.5)
+#### RF Model ####
+plt.scatter(y_test, rfpred, alpha=0.5)
+#### SVR Model ####
+plt.scatter(y_test, svrpred, alpha=0.5)
